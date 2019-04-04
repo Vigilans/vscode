@@ -247,7 +247,7 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 		return group.openEditor(editor, options);
 	}
 
-	private findTargetGroup(input: IEditorInput, options?: IEditorOptions, group?: IEditorGroup | GroupIdentifier | SIDE_GROUP_TYPE | ACTIVE_GROUP_TYPE): IEditorGroup {
+	public findTargetGroup(input: IEditorInput, options?: IEditorOptions, group?: IEditorGroup | GroupIdentifier | SIDE_GROUP_TYPE | ACTIVE_GROUP_TYPE): IEditorGroup {
 		let targetGroup: IEditorGroup | undefined;
 
 		// Group: Instance of Group

@@ -185,4 +185,7 @@ export interface IEditorService {
 	 * Converts a lightweight input to a workbench editor input.
 	 */
 	createInput(input: IResourceEditor): IEditorInput | null;
+
+
+	findTargetGroup?(input: IEditorInput, options?: IEditorOptions, group?: IEditorGroup | GroupIdentifier | SIDE_GROUP_TYPE | ACTIVE_GROUP_TYPE): IEditorGroup;
 }

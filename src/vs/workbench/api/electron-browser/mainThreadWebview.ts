@@ -200,7 +200,17 @@ export class MainThreadWebviews extends Disposable implements MainThreadWebviews
 			return;
 		}
 
-		const targetGroup = this._editorGroupService.getGroup(viewColumnToEditorGroup(this._editorGroupService, showOptions.viewColumn)) || this._editorGroupService.getGroup(webview.group || 0);
+		const group = viewColumnToEditorGroup(this._editorGroupService, showOptions.viewColumn);
+		const targetGroup = this._editorService.findTargetGroup!(webview, { preserveFocus: showOptions.preserveFocus }, group);
+		// let targetGroup: IEditorGroup | undefined;
+		// switch (group) {
+		// 	case SIDE_GROUP: {
+		// 		targetGroup = this._editorService.findSideBySideGroup();
+		// 	}
+		// 	default: {
+		// 		targetGroup = this._editorGroupService.getGroup(group) || this._editorGroupService.getGroup(webview.group || 0);
+		// 	}
+		// }
 		if (targetGroup) {
 			this._webviewService.revealWebview(webview, targetGroup, !!showOptions.preserveFocus);
 		}
