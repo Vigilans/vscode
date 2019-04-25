@@ -153,7 +153,7 @@ class NotificationMessageRenderer {
 
 				const anchor = document.createElement('a');
 				anchor.textContent = link.name;
-				anchor.title = link.href;
+				anchor.title = link.title;
 				anchor.href = link.href;
 
 				if (actionHandler) {
@@ -349,6 +349,9 @@ export class NotificationTemplateRenderer {
 					break;
 				case NotificationViewItemLabelKind.PROGRESS:
 					this.renderProgress(notification);
+					break;
+				case NotificationViewItemLabelKind.MESSAGE:
+					this.renderMessage(notification);
 					break;
 			}
 		}));

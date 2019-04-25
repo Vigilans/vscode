@@ -41,9 +41,9 @@ const defaultCssRules = `
 	body {
 		background-color: var(--vscode-editor-background);
 		color: var(--vscode-editor-foreground);
-		font-family: var(--vscode-editor-font-family);
-		font-weight: var(--vscode-editor-font-weight);
-		font-size: var(--vscode-editor-font-size);
+		font-family: var(--vscode-font-family);
+		font-weight: var(--vscode-font-weight);
+		font-size: var(--vscode-font-size);
 		margin: 0;
 		padding: 0 20px;
 	}
@@ -112,16 +112,18 @@ module.exports = function createWebviewManager(host) {
 	};
 
 	/**
-	 * @param {HTMLDocument} document
-	 * @param {HTMLElement} body
+	 * @param {HTMLDocument?} document
+	 * @param {HTMLElement?} body
 	 */
 	const applyStyles = (document, body) => {
-		if (!body) {
+		if (!document) {
 			return;
 		}
 
-		body.classList.remove('vscode-light', 'vscode-dark', 'vscode-high-contrast');
-		body.classList.add(initData.activeTheme);
+		if (body) {
+			body.classList.remove('vscode-light', 'vscode-dark', 'vscode-high-contrast');
+			body.classList.add(initData.activeTheme);
+		}
 
 		if (initData.styles) {
 			for (const variable of Object.keys(initData.styles)) {
@@ -182,6 +184,9 @@ module.exports = function createWebviewManager(host) {
 
 	let isHandlingScroll = false;
 	const handleInnerScroll = (event) => {
+		if (!event.target || !event.target.body) {
+			return;
+		}
 		if (isHandlingScroll) {
 			return;
 		}
@@ -203,6 +208,10 @@ module.exports = function createWebviewManager(host) {
 	};
 
 	document.addEventListener('DOMContentLoaded', () => {
+		if (!document.body) {
+			return;
+		}
+
 		host.onMessage('styles', (_event, variables, activeTheme) => {
 			initData.styles = variables;
 			initData.activeTheme = activeTheme;
@@ -212,7 +221,9 @@ module.exports = function createWebviewManager(host) {
 				return;
 			}
 
-			applyStyles(target.contentDocument, target.contentDocument.body);
+			if (target.contentDocument) {
+				applyStyles(target.contentDocument, target.contentDocument.body);
+			}
 		});
 
 		// propagate focus
@@ -323,7 +334,16 @@ module.exports = function createWebviewManager(host) {
 
 			// write new content onto iframe
 			newFrame.contentDocument.open('text/html', 'replace');
+
 			newFrame.contentWindow.addEventListener('keydown', handleInnerKeydown);
+
+			newFrame.contentWindow.addEventListener('DOMContentLoaded', e => {
+				const contentDocument = e.target ? (/** @type {HTMLDocument} */ (e.target)) : undefined;
+				if (contentDocument) {
+					applyStyles(contentDocument, contentDocument.body);
+				}
+			});
+
 			newFrame.contentWindow.onbeforeunload = () => {
 				if (isInDevelopmentMode) { // Allow reloads while developing a webview
 					host.postMessage('do-reload');
@@ -335,15 +355,15 @@ module.exports = function createWebviewManager(host) {
 				return false;
 			};
 
-			let onLoad = (contentDocument, contentWindow) => {
-				if (contentDocument.body) {
+			const onLoad = (contentDocument, contentWindow) => {
+				if (contentDocument && contentDocument.body) {
 					// Workaround for https://github.com/Microsoft/vscode/issues/12865
 					// check new scrollY and reset if neccessary
 					setInitialScrollPosition(contentDocument.body, contentWindow);
 				}
 
 				const newFrame = getPendingFrame();
-				if (newFrame && newFrame.contentDocument === contentDocument) {
+				if (newFrame && newFrame.contentDocument && newFrame.contentDocument === contentDocument) {
 					const oldActiveFrame = getActiveFrame();
 					if (oldActiveFrame) {
 						document.body.removeChild(oldActiveFrame);

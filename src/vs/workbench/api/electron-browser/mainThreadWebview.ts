@@ -7,7 +7,7 @@ import { Disposable, IDisposable } from 'vs/base/common/lifecycle';
 import * as map from 'vs/base/common/map';
 import { URI, UriComponents } from 'vs/base/common/uri';
 import { ICodeEditorService } from 'vs/editor/browser/services/codeEditorService';
-import { IWebviewOptions } from 'vs/editor/common/modes';
+import * as modes from 'vs/editor/common/modes';
 import { localize } from 'vs/nls';
 import { ExtensionIdentifier } from 'vs/platform/extensions/common/extensions';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
@@ -25,7 +25,6 @@ import { WebviewElement } from 'vs/workbench/contrib/webview/electron-browser/we
 import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { ACTIVE_GROUP, IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
-import { IWorkbenchLayoutService, Parts } from 'vs/workbench/services/layout/browser/layoutService';
 import { extHostNamedCustomer } from '../common/extHostCustomers';
 
 @extHostNamedCustomer(MainContext.MainThreadWebviews)
@@ -61,7 +60,6 @@ export class MainThreadWebviews extends Disposable implements MainThreadWebviews
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 		@ICodeEditorService private readonly _codeEditorService: ICodeEditorService,
-		@IWorkbenchLayoutService private readonly _layoutService: IWorkbenchLayoutService,
 	) {
 		super();
 
@@ -124,7 +122,7 @@ export class MainThreadWebviews extends Disposable implements MainThreadWebviews
 	$createWebviewCodeInset(
 		handle: WebviewInsetHandle,
 		symbolId: string,
-		options: IWebviewOptions,
+		options: modes.IWebviewOptions,
 		extensionId: ExtensionIdentifier,
 		extensionLocation: UriComponents
 	): void {
@@ -136,7 +134,6 @@ export class MainThreadWebviews extends Disposable implements MainThreadWebviews
 		// 4) continue to forward messages to the webview
 		const webview = this._instantiationService.createInstance(
 			WebviewElement,
-			this._layoutService.getContainer(Parts.EDITOR_PART),
 			{
 				extension: {
 					location: URI.revive(extensionLocation),
@@ -192,7 +189,7 @@ export class MainThreadWebviews extends Disposable implements MainThreadWebviews
 		}
 	}
 
-	public $setOptions(handle: WebviewPanelHandle | WebviewInsetHandle, options: IWebviewOptions): void {
+	public $setOptions(handle: WebviewPanelHandle | WebviewInsetHandle, options: modes.IWebviewOptions): void {
 		if (typeof handle === 'number') {
 			this.getWebviewElement(handle).options = reviveWebviewOptions(options as any /*todo@mat */);
 		} else {
@@ -417,7 +414,7 @@ export class MainThreadWebviews extends Disposable implements MainThreadWebviews
 function reviveWebviewOptions(options: WebviewInputOptions): WebviewInputOptions {
 	return {
 		...options,
-		localResourceRoots: Array.isArray(options.localResourceRoots) ? options.localResourceRoots.map(URI.revive) : undefined,
+		localResourceRoots: Array.isArray(options.localResourceRoots) ? options.localResourceRoots.map(r => URI.revive(r)) : undefined,
 	};
 }
 

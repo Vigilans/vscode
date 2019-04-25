@@ -20,17 +20,18 @@ import { SnippetSource } from 'vs/workbench/contrib/snippets/browser/snippetsFil
 import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
 import { IFileService } from 'vs/platform/files/common/files';
 import { INotificationService } from 'vs/platform/notification/common/notification';
+import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
 
 const id = 'workbench.action.openSnippets';
 
 namespace ISnippetPick {
 	export function is(thing: object): thing is ISnippetPick {
-		return thing && typeof (<ISnippetPick>thing).filepath === 'string';
+		return thing && URI.isUri((<ISnippetPick>thing).filepath);
 	}
 }
 
 interface ISnippetPick extends IQuickPickItem {
-	filepath: string;
+	filepath: URI;
 	hint?: true;
 }
 
@@ -70,7 +71,7 @@ async function computePicks(snippetService: ISnippetsService, envService: IEnvir
 
 			existing.push({
 				label: basename(file.location.fsPath),
-				filepath: file.location.fsPath,
+				filepath: file.location,
 				description: names.size === 0
 					? nls.localize('global.scope', "(global)")
 					: nls.localize('global.1', "({0})", values(names).join(', '))
@@ -82,7 +83,7 @@ async function computePicks(snippetService: ISnippetsService, envService: IEnvir
 			existing.push({
 				label: basename(file.location.fsPath),
 				description: `(${modeService.getLanguageName(mode)})`,
-				filepath: file.location.fsPath
+				filepath: file.location
 			});
 			seen.add(mode);
 		}
@@ -95,15 +96,15 @@ async function computePicks(snippetService: ISnippetsService, envService: IEnvir
 			future.push({
 				label: mode,
 				description: `(${label})`,
-				filepath: join(dir, `${mode}.json`),
+				filepath: URI.file(join(dir, `${mode}.json`)),
 				hint: true
 			});
 		}
 	}
 
 	existing.sort((a, b) => {
-		let a_ext = extname(a.filepath);
-		let b_ext = extname(b.filepath);
+		let a_ext = extname(a.filepath.path);
+		let b_ext = extname(b.filepath.path);
 		if (a_ext === b_ext) {
 			return a.label.localeCompare(b.label);
 		} else if (a_ext === '.code-snippets') {
@@ -120,7 +121,7 @@ async function computePicks(snippetService: ISnippetsService, envService: IEnvir
 	return { existing, future };
 }
 
-async function createSnippetFile(scope: string, defaultPath: URI, windowService: IWindowService, notificationService: INotificationService, fileService: IFileService, opener: IOpenerService) {
+async function createSnippetFile(scope: string, defaultPath: URI, windowService: IWindowService, notificationService: INotificationService, fileService: IFileService, textFileService: ITextFileService, opener: IOpenerService) {
 
 	await fileService.createFolder(defaultPath);
 	await timeout(100); // ensure quick pick closes...
@@ -138,7 +139,7 @@ async function createSnippetFile(scope: string, defaultPath: URI, windowService:
 		return undefined;
 	}
 
-	await fileService.updateContent(resource, [
+	await textFileService.write(resource, [
 		'{',
 		'\t// Place your ' + scope + ' snippets here. Each snippet is defined under a snippet name and has a scope, prefix, body and ',
 		'\t// description. Add comma separated ids of the languages where the snippet is applicable in the scope field. If scope ',
@@ -163,8 +164,8 @@ async function createSnippetFile(scope: string, defaultPath: URI, windowService:
 	return undefined;
 }
 
-async function createLanguageSnippetFile(pick: ISnippetPick, fileService: IFileService) {
-	if (await fileService.exists(URI.file(pick.filepath))) {
+async function createLanguageSnippetFile(pick: ISnippetPick, fileService: IFileService, textFileService: ITextFileService) {
+	if (await fileService.exists(pick.filepath)) {
 		return;
 	}
 	const contents = [
@@ -184,7 +185,7 @@ async function createLanguageSnippetFile(pick: ISnippetPick, fileService: IFileS
 		'\t// }',
 		'}'
 	].join('\n');
-	await fileService.updateContent(URI.file(pick.filepath), contents);
+	await textFileService.write(pick.filepath, contents);
 }
 
 CommandsRegistry.registerCommand(id, async (accessor): Promise<any> => {
@@ -198,6 +199,7 @@ CommandsRegistry.registerCommand(id, async (accessor): Promise<any> => {
 	const notificationService = accessor.get(INotificationService);
 	const workspaceService = accessor.get(IWorkspaceContextService);
 	const fileService = accessor.get(IFileService);
+	const textFileService = accessor.get(ITextFileService);
 
 	const picks = await computePicks(snippetService, envService, modeService);
 	const existing: QuickPickInput[] = picks.existing;
@@ -231,14 +233,14 @@ CommandsRegistry.registerCommand(id, async (accessor): Promise<any> => {
 	});
 
 	if (globalSnippetPicks.indexOf(pick as SnippetPick) >= 0) {
-		return createSnippetFile((pick as SnippetPick).scope, (pick as SnippetPick).uri, windowService, notificationService, fileService, opener);
+		return createSnippetFile((pick as SnippetPick).scope, (pick as SnippetPick).uri, windowService, notificationService, fileService, textFileService, opener);
 	} else if (workspaceSnippetPicks.indexOf(pick as SnippetPick) >= 0) {
-		return createSnippetFile((pick as SnippetPick).scope, (pick as SnippetPick).uri, windowService, notificationService, fileService, opener);
+		return createSnippetFile((pick as SnippetPick).scope, (pick as SnippetPick).uri, windowService, notificationService, fileService, textFileService, opener);
 	} else if (ISnippetPick.is(pick)) {
 		if (pick.hint) {
-			await createLanguageSnippetFile(pick, fileService);
+			await createLanguageSnippetFile(pick, fileService, textFileService);
 		}
-		return opener.open(URI.file(pick.filepath));
+		return opener.open(pick.filepath);
 	}
 });
 

@@ -15,7 +15,7 @@ import { app } from 'electron';
 import { basename } from 'vs/base/common/path';
 import { URI } from 'vs/base/common/uri';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { WorkspaceStats, SystemInfo } from 'vs/platform/diagnostics/common/diagnosticsService';
+import { IMachineInfo, WorkspaceStats, SystemInfo, IRemoteDiagnosticInfo, isRemoteDiagnosticError } from 'vs/platform/diagnostics/common/diagnosticsService';
 import { collectWorkspaceStats, getMachineInfo } from 'vs/platform/diagnostics/node/diagnosticsService';
 import { ProcessItem } from 'vs/base/common/processes';
 
@@ -46,12 +46,21 @@ export interface PerformanceInfo {
 	processInfo?: string;
 	workspaceInfo?: string;
 }
-
 export class DiagnosticsService implements IDiagnosticsService {
 
 	_serviceBrand: any;
 
-	formatEnvironment(info: IMainProcessInfo): string {
+	private formatMachineInfo(info: IMachineInfo): string {
+		const output: string[] = [];
+		output.push(`OS Version:       ${info.os}`);
+		output.push(`CPUs:             ${info.cpus}`);
+		output.push(`Memory (System):  ${info.memory}`);
+		output.push(`VM:               ${info.vmHint}`);
+
+		return output.join('\n');
+	}
+
+	private formatEnvironment(info: IMainProcessInfo): string {
 		const MB = 1024 * 1024;
 		const GB = 1024 * MB;
 
@@ -76,10 +85,45 @@ export class DiagnosticsService implements IDiagnosticsService {
 
 	async getPerformanceInfo(launchService: ILaunchService): Promise<PerformanceInfo> {
 		const info = await launchService.getMainProcessInfo();
-		return Promise.all<ProcessItem, string>([listProcesses(info.mainPID), this.formatWorkspaceMetadata(info)]).then(result => {
-			const [rootProcess, workspaceInfo] = result;
+		return Promise.all<ProcessItem, string>([listProcesses(info.mainPID), this.formatWorkspaceMetadata(info)]).then(async result => {
+			let [rootProcess, workspaceInfo] = result;
+			let processInfo = this.formatProcessList(info, rootProcess);
+
+			try {
+				const remoteData = await launchService.getRemoteDiagnostics({ includeProcesses: true, includeWorkspaceMetadata: true });
+				remoteData.forEach(diagnostics => {
+					if (isRemoteDiagnosticError(diagnostics)) {
+						processInfo += `\n${diagnostics.errorMessage}`;
+						workspaceInfo += `\n${diagnostics.errorMessage}`;
+					} else {
+						processInfo += `\n\nRemote: ${diagnostics.hostName}`;
+						if (diagnostics.processes) {
+							processInfo += `\n${this.formatProcessList(info, diagnostics.processes)}`;
+						}
+
+						if (diagnostics.workspaceMetadata) {
+							workspaceInfo += `\n|  Remote: ${diagnostics.hostName}`;
+							for (const folder of Object.keys(diagnostics.workspaceMetadata)) {
+								const metadata = diagnostics.workspaceMetadata[folder];
+
+								let countMessage = `${metadata.fileCount} files`;
+								if (metadata.maxFilesReached) {
+									countMessage = `more than ${countMessage}`;
+								}
+
+								workspaceInfo += `|    Folder (${folder}): ${countMessage}`;
+								workspaceInfo += this.formatWorkspaceStats(metadata);
+							}
+						}
+					}
+				});
+			} catch (e) {
+				processInfo += `\nFetching remote data failed: ${e}`;
+				workspaceInfo += `\nFetching remote data failed: ${e}`;
+			}
+
 			return {
-				processInfo: this.formatProcessList(info, rootProcess),
+				processInfo,
 				workspaceInfo
 			};
 		});
@@ -95,7 +139,8 @@ export class DiagnosticsService implements IDiagnosticsService {
 			vmHint,
 			processArgs: `${info.mainArguments.join(' ')}`,
 			gpuStatus: app.getGPUFeatureStatus(),
-			screenReader: `${app.isAccessibilitySupportEnabled() ? 'yes' : 'no'}`
+			screenReader: `${app.isAccessibilitySupportEnabled() ? 'yes' : 'no'}`,
+			remoteData: (await launchService.getRemoteDiagnostics({ includeProcesses: false, includeWorkspaceMetadata: false })).filter((x): x is IRemoteDiagnosticInfo => !(x instanceof Error))
 		};
 
 
@@ -120,10 +165,44 @@ export class DiagnosticsService implements IDiagnosticsService {
 			output.push(this.formatProcessList(info, rootProcess));
 
 			// Workspace Stats
-			if (info.windows.some(window => window.folderURIs && window.folderURIs.length > 0)) {
+			if (info.windows.some(window => window.folderURIs && window.folderURIs.length > 0 && !window.remoteAuthority)) {
 				output.push('');
 				output.push('Workspace Stats: ');
 				output.push(await this.formatWorkspaceMetadata(info));
+			}
+
+			try {
+				const data = await launchService.getRemoteDiagnostics({ includeProcesses: true, includeWorkspaceMetadata: true });
+				data.forEach(diagnostics => {
+					if (isRemoteDiagnosticError(diagnostics)) {
+						output.push(`\n${diagnostics.errorMessage}`);
+					} else {
+						output.push('\n\n');
+						output.push(`Remote:           ${diagnostics.hostName}`);
+						output.push(this.formatMachineInfo(diagnostics.machineInfo));
+
+						if (diagnostics.processes) {
+							output.push(this.formatProcessList(info, diagnostics.processes));
+						}
+
+						if (diagnostics.workspaceMetadata) {
+							for (const folder of Object.keys(diagnostics.workspaceMetadata)) {
+								const metadata = diagnostics.workspaceMetadata[folder];
+
+								let countMessage = `${metadata.fileCount} files`;
+								if (metadata.maxFilesReached) {
+									countMessage = `more than ${countMessage}`;
+								}
+
+								output.push(`Folder (${folder}): ${countMessage}`);
+								output.push(this.formatWorkspaceStats(metadata));
+							}
+						}
+					}
+				});
+			} catch (e) {
+				output.push('\n\n');
+				output.push(`Fetching status information from remotes failed: ${e.message}`);
 			}
 
 			output.push('');
@@ -195,7 +274,7 @@ export class DiagnosticsService implements IDiagnosticsService {
 		const workspaceStatPromises: Promise<void>[] = [];
 
 		info.windows.forEach(window => {
-			if (window.folderURIs.length === 0) {
+			if (window.folderURIs.length === 0 || !!window.remoteAuthority) {
 				return;
 			}
 
@@ -236,13 +315,13 @@ export class DiagnosticsService implements IDiagnosticsService {
 		output.push('CPU %\tMem MB\t   PID\tProcess');
 
 		if (rootProcess) {
-			this.formatProcessItem(mapPidToWindowTitle, output, rootProcess, 0);
+			this.formatProcessItem(info.mainPID, mapPidToWindowTitle, output, rootProcess, 0);
 		}
 
 		return output.join('\n');
 	}
 
-	private formatProcessItem(mapPidToWindowTitle: Map<number, string>, output: string[], item: ProcessItem, indent: number): void {
+	private formatProcessItem(mainPid: number, mapPidToWindowTitle: Map<number, string>, output: string[], item: ProcessItem, indent: number): void {
 		const isRoot = (indent === 0);
 
 		const MB = 1024 * 1024;
@@ -250,7 +329,7 @@ export class DiagnosticsService implements IDiagnosticsService {
 		// Format name with indent
 		let name: string;
 		if (isRoot) {
-			name = `${product.applicationName} main`;
+			name = item.pid === mainPid ? `${product.applicationName} main` : 'remote agent';
 		} else {
 			name = `${repeat('  ', indent)} ${item.name}`;
 
@@ -263,7 +342,7 @@ export class DiagnosticsService implements IDiagnosticsService {
 
 		// Recurse into children if any
 		if (Array.isArray(item.children)) {
-			item.children.forEach(child => this.formatProcessItem(mapPidToWindowTitle, output, child, indent + 1));
+			item.children.forEach(child => this.formatProcessItem(mainPid, mapPidToWindowTitle, output, child, indent + 1));
 		}
 	}
 }

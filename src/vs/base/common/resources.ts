@@ -146,7 +146,7 @@ export function normalizePath(resource: URI): URI {
 export function originalFSPath(uri: URI): string {
 	let value: string;
 	const uriPath = uri.path;
-	if (uri.authority && uriPath.length > 1 && uri.scheme === 'file') {
+	if (uri.authority && uriPath.length > 1 && uri.scheme === Schemas.file) {
 		// unc path: file://shares/c$/far/boo
 		value = `//${uri.authority}${uriPath}`;
 	} else if (
@@ -284,7 +284,6 @@ export namespace DataUri {
 	}
 }
 
-
 export class ResourceGlobMatcher {
 
 	private readonly globalExpression: ParsedExpression;
@@ -310,4 +309,17 @@ export class ResourceGlobMatcher {
 		}
 		return !!this.globalExpression(resource.path);
 	}
+}
+
+export function toLocalResource(resource: URI, authority: string | undefined): URI {
+	if (authority) {
+		let path = resource.path;
+		if (path && path[0] !== paths.posix.sep) {
+			path = paths.posix.sep + path;
+		}
+
+		return resource.with({ scheme: Schemas.vscodeRemote, authority, path });
+	}
+
+	return resource.with({ scheme: Schemas.file });
 }
